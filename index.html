@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>UB Homecoming Sip &amp; Shop — your photo</title>
+    <!--
+      Stand-alone guest photo page (the QR code on the mirror links here with ?t=TOKEN).
+      Sends the sign-up to the Apps Script backend as a cookie-less request, so it works even on phones signed
+      into several Google accounts (script.google.com pages fail there with "unable to open the file").
+      Built by scripts/build-photo-page.mjs, which fills in the backend URL; host the output on any static web host.
+    -->
+    <style>
+      :root { --bg: #0b1424; --bg2: #13233d; --text: #f7f3ea; --then: #d9822b; --now: #f2b705; --muted: rgba(247, 243, 234, 0.72); }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body { margin: 0; min-height: 100vh; font-family: Roboto, 'Segoe UI', Arial, sans-serif; color: var(--text);
+        background: radial-gradient(120% 50% at 50% 0%, rgba(217, 130, 43, 0.3), transparent 60%), linear-gradient(180deg, var(--bg2), var(--bg)); }
+      main { max-width: 480px; margin: 0 auto; padding: max(24px, env(safe-area-inset-top)) 18px max(36px, env(safe-area-inset-bottom)); }
+      .eyebrow { color: var(--now); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 13px; }
+      h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 28px; line-height: 1.15; margin: 6px 0 18px; }
+      p { line-height: 1.5; }
+      label { display: block; font-weight: 600; margin: 14px 0 6px; }
+      input[type='text'], input[type='email'], input[type='number'] { width: 100%; font-size: 17px; padding: 13px 14px; border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.07); color: var(--text); }
+      .row { display: flex; gap: 12px; }
+      .row > div { flex: 1; min-width: 0; }
+      .check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; font-size: 14px; color: var(--muted); }
+      .check input { width: 22px; height: 22px; flex: none; margin-top: 2px; }
+      button { width: 100%; margin-top: 22px; padding: 16px; font-size: 18px; font-weight: 800; border: 0; border-radius: 999px;
+        background: linear-gradient(100deg, var(--then), #e79aa6 50%, var(--now)); color: #1a1206; touch-action: manipulation; }
+      button:disabled { opacity: 0.6; }
+      .error { color: #ffb4a8; min-height: 1.2em; }
+      .photo { width: 100%; border-radius: 14px; margin: 10px 0; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+      .save { display: block; text-align: center; padding: 14px; border-radius: 999px; background: var(--now); color: #0b1424; font-weight: 800; text-decoration: none; }
+      small, .fine { color: var(--muted); font-size: 12px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">UB Homecoming Sip &amp; Shop</div>
+      <h1>From COB to UB: Wear the Legacy</h1>
+
+      <p id="badLink" class="hidden">This photo link isn't valid. Please scan the QR code on the mirror again.</p>
+
+      <section id="formView" class="hidden">
+        <p>Enter your details to get your photo. It appears right here, and we email you a copy.</p>
+        <form id="f" novalidate>
+          <div class="row">
+            <div><label for="firstName">First name</label><input id="firstName" type="text" autocomplete="given-name" maxlength="60" required /></div>
+            <div><label for="lastName">Last name</label><input id="lastName" type="text" autocomplete="family-name" maxlength="60" required /></div>
+          </div>
+          <label for="email">Email address</label>
+          <input id="email" type="email" autocomplete="email" inputmode="email" maxlength="120" required />
+          <label for="classYear">UB / COB class year <small>(optional)</small></label>
+          <input id="classYear" type="number" inputmode="numeric" min="1950" max="2099" placeholder="e.g. 2009" />
+          <label class="check"><input id="consent" type="checkbox" required />
+            <span>I agree to receive my photo by email and for Radius ConX to keep my name and email to deliver it. Photos are deleted after 30 days.</span></label>
+          <label class="check"><input id="optIn" type="checkbox" /><span>Keep me posted about Radius ConX experiences and UB alumni events (optional)</span></label>
+          <p class="error" id="err"></p>
+          <button id="go" type="submit">Get my photo</button>
+        </form>
+      </section>
+
+      <section id="doneView" class="hidden">
+        <p id="doneMsg"></p>
+        <img id="photo" class="photo hidden" alt="Your photo" />
+        <a id="save" class="save hidden" download="UB-Homecoming-photo.jpg">Save photo</a>
+        <p class="fine" id="saveHint" style="text-align: center">If Save doesn't work, press and hold the photo, then choose “Save image”.</p>
+      </section>
+
+      <p class="fine">Questions or want your details removed? Email radiusconnects@gmail.com.</p>
+    </main>
+    <script>
+      var ENDPOINT = "https://script.google.com/macros/s/AKfycbxSHQScORIk6cyIleEDUfKydWRsirO8Pq-83Zh3dPm2tmPn_Nxt1jkDgX8p5Fd7tTZE/exec";
+      var TOKEN = new URLSearchParams(location.search).get('t') || '';
+      var $ = function (id) { return document.getElementById(id); };
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(TOKEN)) $('badLink').classList.remove('hidden');
+      else $('formView').classList.remove('hidden');
+
+      // text/plain keeps this a "simple" request (Apps Script can't answer a CORS preflight); no cookies are sent,
+      // so the guest's own Google sign-ins never get involved
+      function claim(form) {
+        var ctl = new AbortController();
+        var timer = setTimeout(function () { ctl.abort(); }, 45000);
+        return fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'claim', form: form }),
+          credentials: 'omit',
+          redirect: 'follow',
+          signal: ctl.signal,
+        })
+          .then(function (res) { return res.json(); })
+          .finally(function () { clearTimeout(timer); });
+      }
+
+      $('f').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var go = $('go');
+        var err = $('err');
+        err.textContent = '';
+        var form = {
+          token: TOKEN,
+          firstName: $('firstName').value,
+          lastName: $('lastName').value,
+          email: $('email').value,
+          classYear: $('classYear').value,
+          consent: $('consent').checked,
+          optIn: $('optIn').checked,
+        };
+        go.disabled = true;
+        go.textContent = 'Getting your photo…';
+        claim(form)
+          .then(function (r) {
+            go.disabled = false;
+            go.textContent = 'Get my photo';
+            if (!r || !r.ok) { err.textContent = (r && r.error) || 'Something went wrong. Please try again.'; return; }
+            $('formView').classList.add('hidden');
+            $('doneView').classList.remove('hidden');
+            var msg = $('doneMsg');
+            if (r.found) {
+              $('photo').src = r.image;
+              $('photo').classList.remove('hidden');
+              $('save').href = r.image;
+              $('save').classList.remove('hidden');
+              msg.textContent = r.emailStatus === 'sent'
+                ? 'Here you go, ' + form.firstName + '! A copy is on its way to ' + form.email + '.'
+                : 'Here you go, ' + form.firstName + '! Save it now — we will also email you a copy shortly.';
+            } else {
+              msg.textContent = r.message;
+              $('saveHint').classList.add('hidden');
+            }
+            window.scrollTo(0, 0);
+          })
+          .catch(function () {
+            go.disabled = false;
+            go.textContent = 'Get my photo';
+            err.textContent = 'Connection problem — please try again.';
+          });
+      });
+    </script>
+  </body>
+</html>
